@@ -3,6 +3,7 @@ opencv-python-headless>=4.8,<5
 gdown>=5.0
 yt-dlp
 requests
+edge-tts>=6.1
 google-api-python-client
 google-auth
 google-auth-oauthlib

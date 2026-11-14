@@ -441,6 +441,20 @@ def chunk_words(words, max_words=3, max_chars=16):
     return chunks
 
 
+def wrap_text(text, width):
+    """Ручной перенос строк для ASS (\\N), чтобы длинный текст не вылезал за края."""
+    out, line = [], ""
+    for w in text.split():
+        if line and len(line) + 1 + len(w) > width:
+            out.append(line)
+            line = w
+        else:
+            line = f"{line} {w}".strip()
+    if line:
+        out.append(line)
+    return "\\N".join(out)
+
+
 def make_ass(words, clip_s, clip_e, path, a, top_text=""):
     ws = [dict(w, start=w["start"] - clip_s, end=w["end"] - clip_s)
           for w in words if w["end"] > clip_s and w["start"] < clip_e]
@@ -459,6 +473,7 @@ ScaledBorderAndShadow: yes
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{a.font},{a.font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,7,3,5,70,70,0,1
 Style: Top,{a.font},{a.top_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,6,2,5,60,60,0,1
+Style: Item,{a.font},{a.cap_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,2,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -467,9 +482,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     dur = clip_e - clip_s
     if top_text:
         tt = top_text.replace("{", "").replace("}", "").replace("\\", "")
-        tt = tt.upper() if a.upper else tt
+        tt = wrap_text(tt.upper() if a.upper else tt, max(10, int(940 / (0.62 * a.top_size))))
         ty = int(OUT_H * a.top_y)
         lines.append(f"Dialogue: 1,{ass_time(0)},{ass_time(dur)},Top,,0,0,0,,{{\\an5\\pos({OUT_W // 2},{ty})}}{tt}")
+    if getattr(a, "captions", None):  # подписи-пункты (формат «список»)
+        hl_item = rgb_to_ass(a.hl_color)
+        cy = int(OUT_H * a.cap_y)
+        for c in json.loads(Path(a.captions).read_text(encoding="utf-8")):
+            num = str(c.get("num", "")).replace("{", "").replace("}", "")
+            txt = wrap_text(str(c["text"]).replace("{", "").replace("}", "").replace("\\", ""),
+                            max(10, int(900 / (0.55 * a.cap_size))))
+            head_num = f"{{\\c{hl_item}}}{num}{{\\c&HFFFFFF&}} " if num else ""
+            lines.append(f"Dialogue: 2,{ass_time(c['start'])},{ass_time(min(c['end'], dur))},Item,,0,0,0,,"
+                         f"{{\\an5\\pos({OUT_W // 2},{cy})\\fad(150,100)}}{head_num}{txt}")
     for ci, ch in enumerate(chunks):
         nxt = chunks[ci + 1][0]["start"] if ci + 1 < len(chunks) else dur
         chunk_end = min(nxt, ch[-1]["end"] + 0.5, dur)
@@ -674,6 +699,9 @@ def main():
                     help="текст-заголовок на весь ролик; варианты через | — будут чередоваться по роликам")
     ap.add_argument("--top-y", type=float, help="высота заголовка")
     ap.add_argument("--top-size", type=int, default=72)
+    ap.add_argument("--captions", help="JSON с подписями [{start,end,text,num}] — для формата «список»")
+    ap.add_argument("--cap-y", type=float, default=0.84, help="высота подписей-пунктов")
+    ap.add_argument("--cap-size", type=int, default=66)
     ap.add_argument("--no-subs", action="store_true", help="без субтитров и распознавания речи (чистый геймплей)")
     ap.add_argument("--model", default="small", help="модель Whisper: tiny/base/small/medium/large-v3")
     ap.add_argument("--lang", default=None, help="язык речи: ru, en… (по умолчанию автоопределение)")

@@ -10,7 +10,15 @@
       "game",
       "--no-subs",
       "--fit-zoom",
-      "1.65"
+      "1.65",
+      "--banner-y",
+      "0.085",
+      "--top-y",
+      "0.18",
+      "--top-size",
+      "60",
+      "--cap-size",
+      "70"
     ],
     "hooks": [
       "Самый жёсткий момент в STALZONE",
@@ -48,7 +56,13 @@
       "cooldown_days": 7,
       "max_overlap": 0.34,
       "lookback_days": 30
-    }
+    },
+    "formats": [
+      "story",
+      "list",
+      "montage"
+    ],
+    "bg_cooldown_days": 3
   },
   "accounts": [
     {

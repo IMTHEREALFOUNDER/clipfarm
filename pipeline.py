@@ -179,9 +179,10 @@ def probe_info(path):
     return dur, has_audio
 
 
-def autoclip_cmd(cfg, camp, video, out_dir, n, hooks_rot, extra):
+def autoclip_cmd(cfg, camp, video, out_dir, n, hooks_rot, extra, subs=False):
+    args = [x for x in camp.get("autoclip_args", []) if not (subs and x == "--no-subs")]
     cmd = [sys.executable, str(ROOT / "autoclip.py"), str(video), "--out", str(out_dir),
-           "--clips", str(n), *camp.get("autoclip_args", []), *extra]
+           "--clips", str(n), *args, *extra]
     if camp.get("banner"):
         cmd += ["--banner", str(ROOT / camp["banner"])]
     if hooks_rot:
@@ -244,14 +245,52 @@ def best_piece(path, length, excl, cache=None, rand=False):
     return (s, e) if not AC.overlaps(s, e, excl, margin=0.5) else None
 
 
+def render_pieces(pieces, out_path, speed_random=False, voice=None, voice_delay=0.0, total=None, bg_volume=1.0):
+    """Склеивает куски [(key, path, s, e, has_audio)] в 1920x1080 60fps.
+    voice — mp3 с озвучкой: накладывается поверх, звук игры приглушается до bg_volume."""
+    import random
+    inputs, filt = [], []
+    for i, (_, path, s, e, has_audio) in enumerate(pieces):
+        sp = random.choice([1.0, 1.0, 1.1]) if speed_random else 1.0
+        inputs += ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}", "-i", str(path)]
+        filt.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
+                    f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=60,setsar=1,setpts=PTS/{sp},format=yuv420p[v{i}]")
+        if has_audio:
+            filt.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,"
+                        f"atrim=0:{e - s:.3f},asetpts=PTS-STARTPTS,atempo={sp}[a{i}]")
+        else:
+            filt.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{(e - s) / sp:.3f}[a{i}]")
+    n = len(pieces)
+    filt.append("".join(f"[v{i}][a{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=1[vc][ac]")
+    vout, aout = "[vc]", "[ac]"
+    if total:
+        filt.append(f"[vc]trim=0:{total:.3f},setpts=PTS-STARTPTS[vt]")
+        vout = "[vt]"
+    if voice:
+        inputs += ["-i", str(voice)]
+        d = int(voice_delay * 1000)
+        filt.append(f"[ac]volume={bg_volume}[bgq]")
+        filt.append(f"[{n}:a]aresample=48000,aformat=channel_layouts=stereo,adelay={d}|{d},volume=1.6[vo]")
+        filt.append("[bgq][vo]amix=inputs=2:duration=first:normalize=0[am]")
+        aout = "[am]"
+    if total:
+        filt.append(f"{aout}atrim=0:{total:.3f},asetpts=PTS-STARTPTS[at]")
+        aout = "[at]"
+    cmd = ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(filt),
+           "-map", vout, "-map", aout, "-c:v", "libx264", "-preset", "veryfast", "-crf", "17",
+           "-c:a", "aac", "-b:a", "192k", str(out_path)]
+    subprocess.run(cmd, check=True)
+    return out_path
+
+
 def build_montage(shorts, state, mcfg, out_path, recycle=False, cooldown=30):
-    """Склейка нескольких коротких B-roll фрагментов в один исходник для ролика."""
+    """Монтаж: склейка коротких B-roll фрагментов. Свежий режим — каждый кусок один раз."""
     import random
     target = random.uniform(*mcfg.get("target", [45, 60]))
     pmin, pmax = mcfg.get("piece", [5, 9])
     if recycle:
         order = shorts[:]
-        random.shuffle(order)  # новые сочетания и новый порядок
+        random.shuffle(order)
     else:
         start = state.get("montage_offset", 0)
         order = shorts[start % len(shorts):] + shorts[:start % len(shorts)]
@@ -279,56 +318,254 @@ def build_montage(shorts, state, mcfg, out_path, recycle=False, cooldown=30):
         state["montage_offset"] = state.get("montage_offset", 0) + max(1, len(pieces))
     if total < mcfg.get("min_total", 40):
         return None, []
-    # 1) одна и та же склейка не повторяется никогда
     sig = "|".join(f"{k}@{round(s)}" for k, _, s, _, _ in pieces)
     seen = state.setdefault("montage_sigs", [])
     if sig in seen:
         return None, []
-    # 2) «почти копии» тоже нельзя: с любым роликом за lookback_days общих фрагментов не больше max_overlap
     rcfg = mcfg.get("_recycle", {})
-    ids = {f"{k}@{int(s // 3)}" for k, _, s, _, _ in pieces}  # кусок ±3 сек считаем тем же
+    ids = {f"{k}@{int(s // 3)}" for k, _, s, _, _ in pieces}
     cutoff = (dt.date.today() - dt.timedelta(days=rcfg.get("lookback_days", 30))).isoformat()
     hist = [h for h in state.get("montage_history", []) if h["d"] >= cutoff]
-    limit = rcfg.get("max_overlap", 0.34)
     for h in hist:
-        if len(ids & set(h["p"])) / max(1, len(ids)) > limit:
+        if len(ids & set(h["p"])) / max(1, len(ids)) > rcfg.get("max_overlap", 0.34):
             return None, []
     seen.append(sig)
     state["montage_sigs"] = seen[-2000:]
     hist.append({"d": today_str(), "p": sorted(ids)})
     state["montage_history"] = hist
-    inputs, filt = [], []
-    for i, (_, path, s, e, has_audio) in enumerate(pieces):
-        # при пересборке часть кусков слегка ускоряем — ролик выглядит иначе
-        sp = random.choice([1.0, 1.0, 1.1]) if recycle else 1.0
-        inputs += ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}", "-i", str(path)]
-        filt.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
-                    f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=60,setsar=1,setpts=PTS/{sp},format=yuv420p[v{i}]")
-        if has_audio:
-            filt.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,"
-                        f"atrim=0:{e - s:.3f},asetpts=PTS-STARTPTS,atempo={sp}[a{i}]")
-        else:
-            filt.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{(e - s) / sp:.3f}[a{i}]")
-    filt.append("".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + f"concat=n={len(pieces)}:v=1:a=1[v][a]")
-    cmd = ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(filt),
-           "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17",
-           "-c:a", "aac", "-b:a", "192k", str(out_path)]
-    subprocess.run(cmd, check=True)
+    render_pieces(pieces, out_path, speed_random=recycle)
     for key, _, s, e, _ in pieces:
         state["sources"][key]["used"].append([round(s, 2), round(e, 2), today_str()])
     return out_path, [k for k, *_ in pieces]
 
 
-def gather_sources(camp, state, need, include_exhausted):
-    """Скачивает футажи и делит их на длинные (резать) и короткие (монтаж)."""
+def pick_bg_pieces(pool, state, lengths, cooldown_days=3):
+    """Фон для истории/списка: куски заданной длины из любых футажей, кроме взятых под фон
+    за последние cooldown_days. Монтажный учёт не трогаем — здесь футаж лишь подложка."""
+    import random
+    bg = state.setdefault("bg_used", {})
+    cutoff = (dt.date.today() - dt.timedelta(days=cooldown_days)).isoformat()
+    for k in list(bg):
+        bg[k] = [u for u in bg[k] if u[2] > cutoff]
+    order = pool[:]
+    random.shuffle(order)
+    pieces, oi, tries = [], 0, 0
+    for L in lengths:
+        got = None
+        while got is None and tries < len(order) * 2 + 10:
+            key, path, dur, has_audio = order[oi % len(order)]
+            oi += 1
+            tries += 1
+            if dur < 2.6:
+                continue
+            excl = [(u[0], u[1]) for u in bg.get(key, [])]
+            try:
+                win = best_piece(path, min(L, dur - 0.3), excl, rand=True)
+            except Exception:
+                win = None
+            if win:
+                got = (key, path, win[0], win[1], has_audio)
+        if got is None:  # всё недавно было фоном — берём любой кусок, но не тот же подряд
+            key, path, dur, has_audio = order[oi % len(order)]
+            oi += 1
+            s0 = random.uniform(0.1, max(0.1, dur - L - 0.1))
+            got = (key, path, s0, min(dur - 0.05, s0 + L), has_audio)
+        pieces.append(got)
+        bg.setdefault(got[0], []).append([round(got[2], 2), round(got[3], 2), today_str()])
+    return pieces
+
+
+def pick_content(items, state, key):
+    """Следующий текст из банка без повторов, пока не пройдён весь банк."""
+    import random
+    used = state.setdefault("content_used", {}).setdefault(key, [])
+    free = [i for i in range(len(items)) if i not in used]
+    if not free:
+        used.clear()
+        free = list(range(len(items)))
+    i = random.choice(free)
+    used.append(i)
+    return items[i]
+
+
+def tts(text, voice, rate, mp3):
+    """Озвучка через edge-tts. Возвращает слова с таймингами [{start,end,word}] и длительность."""
+    import asyncio
+    import edge_tts
+
+    async def run():
+        try:
+            comm = edge_tts.Communicate(text, voice, rate=rate, boundary="WordBoundary")
+        except TypeError:  # старые версии edge-tts отдают слова по умолчанию
+            comm = edge_tts.Communicate(text, voice, rate=rate)
+        words, sents = [], []
+        with open(mp3, "wb") as f:
+            async for ch in comm.stream():
+                if ch["type"] == "audio":
+                    f.write(ch["data"])
+                elif ch["type"] == "WordBoundary":
+                    st = ch["offset"] / 1e7
+                    words.append({"start": st, "end": st + ch["duration"] / 1e7, "word": ch["text"]})
+                elif ch["type"] == "SentenceBoundary":
+                    st = ch["offset"] / 1e7
+                    sents.append((st, st + ch["duration"] / 1e7, ch["text"]))
+        if not words and sents:  # только предложения — раскладываем слова равномерно
+            for st, en, tx in sents:
+                ws = tx.split()
+                step = (en - st) / max(1, len(ws))
+                for j, w in enumerate(ws):
+                    words.append({"start": st + j * step, "end": st + (j + 1) * step, "word": w})
+        return words
+    words = asyncio.run(run())
+    dur, _ = probe_info(mp3)
+    return words, dur
+
+
+def run_autoclip_single(cfg, camp, video, out_dir, title, extra, subs=False):
+    dur, _ = probe_info(video)
+    seg = out_dir / "seg.txt"
+    seg.write_text(f"0:00-{dur:.2f}\n", encoding="utf-8")
+    code = subprocess.run(autoclip_cmd(cfg, camp, video, out_dir, 1, [title] if title else [],
+                                       ["--segments", str(seg), *extra], subs=subs)).returncode
+    manifests = list(out_dir.glob("*.clips.json"))
+    got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
+    if code != 0 or not got:
+        log(f"⚠️ autoclip не собрал ролик (код {code})")
+        return None
+    c = got[0]
+    c["path"] = str(out_dir / c["file"])
+    c["title"] = title or c.get("title", "")
+    return c
+
+
+def fmt_story(cfg, camp, state, longs, shorts, d):
+    """Озвученная история: голос + субтитры по словам + геймплей фоном."""
+    import random
+    content = load_json(ROOT / "content.json", {})
+    if not content.get("stories"):
+        return None
+    st = pick_content(content["stories"], state, "stories")
+    d.mkdir(parents=True, exist_ok=True)
+    voice = d / "voice.mp3"
+    log(f"Озвучка: «{st['title']}»")
+    words, vdur = tts(st["text"], content.get("voice", "ru-RU-DmitryNeural"), content.get("rate", "+0%"), voice)
+    delay = 1.2  # секунда на заголовок до голоса
+    total = max(41.0, delay + vdur + 1.3)
+    lengths, acc = [], 0.0
+    while acc < total + 0.5:
+        L = random.uniform(4.0, 7.0)
+        lengths.append(L)
+        acc += L
+    pieces = pick_bg_pieces(shorts + longs, state, lengths, camp.get("bg_cooldown_days", 3))
+    video = d / "story.mp4"
+    render_pieces(pieces, video, voice=voice, voice_delay=delay, total=total, bg_volume=0.22)
+    for w in words:
+        w["start"] += delay
+        w["end"] += delay
+    save_json(d / "story.transcript.json", {"language": "ru", "words": words})
+    c = run_autoclip_single(cfg, camp, video, d, st["title"], [], subs=True)
+    if c:
+        c["source"] = "story"
+    return c
+
+
+def fmt_list(cfg, camp, state, longs, shorts, d):
+    """Список: заголовок сверху, пункты по одному на кусок геймплея."""
+    import random
+    content = load_json(ROOT / "content.json", {})
+    if not content.get("lists"):
+        return None
+    it = pick_content(content["lists"], state, "lists")
+    d.mkdir(parents=True, exist_ok=True)
+    items = it["items"]
+    per = max(8.2, 46.0 / len(items))
+    lengths = [per + random.uniform(-0.6, 0.8) for _ in items]
+    pieces = pick_bg_pieces(shorts + longs, state, lengths, camp.get("bg_cooldown_days", 3))
+    video = d / "list.mp4"
+    render_pieces(pieces, video)
+    caps, t = [], 0.0
+    for i, (p, txt) in enumerate(zip(pieces, items)):
+        L = p[3] - p[2]
+        caps.append({"start": t + 0.15, "end": t + L - 0.05, "num": f"{i + 1}.", "text": txt})
+        t += L
+    save_json(d / "captions.json", caps)
+    log(f"Список: «{it['title']}»")
+    c = run_autoclip_single(cfg, camp, video, d, it["title"], ["--captions", str(d / "captions.json")])
+    if c:
+        c["source"] = "list"
+    return c
+
+
+def fmt_montage(cfg, camp, state, longs, shorts, d):
+    """Монтаж/нарезка из свежего материала; если он кончился — пересборка старого (recycle)."""
+    hooks = camp.get("hooks", [])
+    offset = state.get("hook_offset", 0)
+    mcfg = dict(camp.get("montage", {}), _recycle=camp.get("recycle", {}))
+    rcfg = camp.get("recycle", {})
+    cooldown = rcfg.get("cooldown_days", 7)
+    d.mkdir(parents=True, exist_ok=True)
+    # 1) длинный свежий футаж — нарезка
+    for key, video, dur, _ in longs:
+        sst = state["sources"][key]
+        if sst.get("exhausted"):
+            continue
+        excl = d / f"{key}.exclude.json"
+        save_json(excl, [list(x) for x in blocked_ranges(sst["used"], False, cooldown)])
+        out_dir = d / key
+        subprocess.run(autoclip_cmd(cfg, camp, video, out_dir, 1, rotated(hooks, offset), ["--exclude", str(excl)]))
+        manifests = list(out_dir.glob("*.clips.json"))
+        got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
+        if not got:
+            sst["exhausted"] = True
+            continue
+        c = got[0]
+        sst["used"].append([c["start"], c["end"], today_str()])
+        c["path"], c["source"] = str(out_dir / c["file"]), key
+        state["hook_offset"] = offset + 1
+        return c
+    # 2) свежий монтаж, 3) пересборка старого
+    has_old = any(len(blocked_ranges(v.get("used", []), True, cooldown)) < len(v.get("used", []))
+                  for v in state.get("sources", {}).values())
+    modes = [False] + ([True] if rcfg.get("enabled") and has_old else [])
+    for recycle in modes:
+        for attempt in range(6 if recycle else 1):
+            if not shorts:
+                break
+            try:
+                mpath, used_keys = build_montage(shorts, state, mcfg, d / "montage.mp4", recycle=recycle,
+                                                 cooldown=cooldown)
+            except subprocess.CalledProcessError as e:
+                log(f"⚠️ Ошибка склейки: {e}")
+                continue
+            if not mpath:
+                continue
+            import random
+            extra = ["--fit-zoom", f"{random.uniform(1.5, 1.8):.2f}"] if recycle else []
+            hook = rotated(hooks, offset)[0] if hooks else ""
+            c = run_autoclip_single(cfg, camp, mpath, d, hook, extra)
+            if c:
+                c["source"] = "+".join(used_keys)
+                state["hook_offset"] = offset + 1
+                if recycle and not state.get("recycle_notified"):
+                    tg_call("sendMessage", {"text": "♻️ Свежие куски для монтажа закончились — монтажи теперь "
+                                                    "пересобираются из старых фрагментов. Истории и списки идут как обычно."})
+                    state["recycle_notified"] = True
+                return c
+    log("Монтаж сейчас недоступен (свежий материал кончился).")
+    return None
+
+
+FORMATS = {"story": fmt_story, "list": fmt_list, "montage": fmt_montage}
+
+
+def gather_sources(camp, state):
+    """Скачивает все футажи (из кэша — мгновенно) и делит на длинные и короткие."""
     mcfg = camp.get("montage", {})
     min_long = mcfg.get("long_threshold", 75)
     longs, shorts, fails = [], [], 0
     for src in expand_sources(campaign_sources(camp), state):
         key = source_key(src)
         sst = state.setdefault("sources", {}).setdefault(key, {"used": [], "exhausted": False})
-        if sst.get("exhausted") and not include_exhausted:
-            continue
         try:
             video = fetch_source(src, WORK / "sources")
             fails = 0
@@ -345,113 +582,33 @@ def gather_sources(camp, state, need, include_exhausted):
         dur, has_audio = probe_info(video)
         sst["duration"] = round(dur, 1)
         (longs if dur >= min_long else shorts).append((key, video, dur, has_audio))
-        if len(longs) >= need and len(shorts) >= max(12, need * 6):
-            break
     return longs, shorts
 
 
 def cut_clips(cfg, state, need, run_dir):
-    """Нарезает `need` роликов. Сначала из нового материала; если он кончился и включён повтор —
-    собирает новые сочетания из фрагментов старше cooldown_days."""
+    """Делает `need` роликов, чередуя форматы из campaign.formats (история / список / монтаж)."""
     camp = cfg["campaign"]
-    rcfg = camp.get("recycle", {})
-    clips = _cut_pass(cfg, state, need, run_dir, recycle=False)
-    cooldown = rcfg.get("cooldown_days", 30)
-    has_old = any(len(blocked_ranges(v.get("used", []), True, cooldown)) < len(v.get("used", []))
-                  for v in state.get("sources", {}).values())
-    if len(clips) < need and rcfg.get("enabled", False) and not has_old:
-        log(f"Новый материал закончился, а старым фрагментам ещё нет {cooldown} дней — повтор пока недоступен.")
-    if len(clips) < need and rcfg.get("enabled", False) and has_old:
-        log(f"\nНовый материал закончился — режим повтора (фрагменты старше {cooldown} дней)")
-        more = _cut_pass(cfg, state, need - len(clips), run_dir / "recycle", recycle=True, cooldown=cooldown)
-        if more and not state.get("recycle_notified"):
-            tg_call("sendMessage", {"text": "♻️ Новый материал закончился — конвейер собирает ролики из старых "
-                                            "фрагментов в новых сочетаниях. Чтобы ролики были свежее, "
-                                            "докинь новые футажи в свою папку."})
-            state["recycle_notified"] = True
-        clips += more
-    elif len(clips) >= need:
-        state["recycle_notified"] = False
-    return clips
-
-
-def _cut_pass(cfg, state, need, run_dir, recycle=False, cooldown=30):
-    import random
-    camp = cfg["campaign"]
-    mcfg = dict(camp.get("montage", {}), _recycle=camp.get("recycle", {}))
-    clips = []
-    hooks = camp.get("hooks", [])
-    offset = state.get("hook_offset", 0)
-    if need <= 0:
-        return clips
-    longs, shorts = gather_sources(camp, state, need, include_exhausted=recycle)
-    log(f"Футажи: длинных {len(longs)}, коротких (для монтажа) {len(shorts)}")
-
-    # 1) длинные — обычная нарезка
-    for key, video, dur, _ in longs:
-        if len(clips) >= need:
-            break
-        sst = state["sources"][key]
-        excl = run_dir / f"{key}.exclude.json"
-        excl.parent.mkdir(parents=True, exist_ok=True)
-        save_json(excl, [list(x) for x in blocked_ranges(sst["used"], recycle, cooldown)])
-        out_dir = run_dir / key
-        log(f"\n=== Нарезка из {key}: нужно ещё {need - len(clips)} ===")
-        code = subprocess.run(autoclip_cmd(cfg, camp, video, out_dir, need - len(clips), rotated(hooks, offset),
-                                           ["--exclude", str(excl)])).returncode
-        manifests = list(out_dir.glob("*.clips.json"))
-        got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
-        if code not in (0, 3):
-            log(f"⚠️ autoclip завершился с кодом {code}")
-        if len(got) < need - len(clips) and not recycle:
-            sst["exhausted"] = True
-            log(f"Исходник {key} исчерпан")
-        for c in got:
-            sst["used"].append([c["start"], c["end"], today_str()])
-            c["path"] = str(out_dir / c["file"])
-            c["source"] = key
-            clips.append(c)
-        offset += len(got)
-
-    # 2) короткие — монтаж из нескольких B-roll фрагментов
-    n, misses = 0, 0
-    while len(clips) < need and shorts and misses < (8 if recycle else 3):
-        n += 1
-        mdir = run_dir / f"montage_{n:02d}"
-        mdir.mkdir(parents=True, exist_ok=True)
-        log(f"\n=== Монтаж №{n}{' (повтор)' if recycle else ''} ===")
+    longs, shorts = gather_sources(camp, state)
+    log(f"Футажи: длинных {len(longs)}, коротких {len(shorts)}")
+    if not longs and not shorts:
+        return []
+    formats = [f for f in camp.get("formats", ["story", "list", "montage"]) if f in FORMATS]
+    clips, attempts = [], 0
+    while len(clips) < need and attempts < need * len(formats) + 2:
+        fmt = formats[state.get("format_offset", 0) % len(formats)]
+        state["format_offset"] = state.get("format_offset", 0) + 1
+        attempts += 1
+        d = run_dir / f"{len(clips) + 1:02d}_{fmt}_{attempts}"
+        log(f"\n=== Ролик {len(clips) + 1}/{need}: формат «{fmt}» ===")
         try:
-            mpath, used_keys = build_montage(shorts, state, mcfg, mdir / f"montage_{n:02d}.mp4",
-                                             recycle=recycle, cooldown=cooldown)
-        except subprocess.CalledProcessError as e:
-            log(f"⚠️ Ошибка склейки: {e}")
-            misses += 1
-            continue
-        if not mpath:
-            misses += 1
-            if not recycle:
-                log("Короткие футажи исчерпаны — новых кусков для монтажа нет.")
-                break
-            continue
-        mdur, _ = probe_info(mpath)
-        seg = mdir / "seg.txt"
-        seg.write_text(f"0:00-{mdur:.2f}\n", encoding="utf-8")
-        extra = ["--segments", str(seg)]
-        if recycle:  # другой масштаб кадра при пересборке
-            extra += ["--fit-zoom", f"{random.uniform(1.5, 1.8):.2f}"]
-        code = subprocess.run(autoclip_cmd(cfg, camp, mpath, mdir, 1, rotated(hooks, offset), extra)).returncode
-        manifests = list(mdir.glob("*.clips.json"))
-        got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
-        if code != 0 or not got:
-            log(f"⚠️ Не удалось собрать ролик из монтажа (код {code})")
-            misses += 1
-            continue
-        c = got[0]
-        c["path"] = str(mdir / c["file"])
-        c["source"] = "+".join(used_keys)
-        clips.append(c)
-        offset += 1
-    state["hook_offset"] = offset
+            c = FORMATS[fmt](cfg, camp, state, longs, shorts, d)
+        except Exception as e:
+            log(f"⚠️ Формат «{fmt}» не получился: {type(e).__name__}: {str(e)[:200]}")
+            c = None
+        if c:
+            c["format"] = fmt
+            clips.append(c)
+        save_json(STATE_PATH, state)
     return clips
 
 
