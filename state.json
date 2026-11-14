@@ -7,7 +7,13 @@
         "2026-11-15T18:00:00Z",
         "2026-11-16T09:00:00Z",
         "2026-11-16T14:00:00Z",
-        "2026-11-16T18:00:00Z"
+        "2026-11-16T18:00:00Z",
+        "2026-11-17T09:00:00Z",
+        "2026-11-17T14:00:00Z",
+        "2026-11-17T18:00:00Z",
+        "2026-11-18T09:00:00Z",
+        "2026-11-18T14:00:00Z",
+        "2026-11-18T18:00:00Z"
       ]
     }
   },
@@ -31,7 +37,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 4.8
     },
     "src_6068b0fcac7f": {
@@ -53,7 +59,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 3.8
     },
     "src_f96c3973d303": {
@@ -64,7 +70,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.2
     },
     "src_15f4506b3799": {
@@ -80,7 +86,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 10.9
     },
     "src_bf5da4e10098": {
@@ -91,7 +97,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 3.5
     },
     "src_d21b86e3b8cb": {
@@ -102,7 +108,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 3.6
     },
     "src_1ab179d8ae75": {
@@ -135,7 +141,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 6.7
     },
     "src_01bba7dcd527": {
@@ -146,7 +152,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 5.5
     },
     "src_cf75557bcd0d": {
@@ -157,7 +163,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 4.6
     },
     "src_4e548667ade5": {
@@ -168,7 +174,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 8.3
     },
     "src_3c008236e421": {
@@ -179,7 +185,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 6.7
     },
     "src_a611dfdf1865": {
@@ -190,7 +196,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 11.8
     },
     "src_4af605526c9a": {
@@ -201,7 +207,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 6.3
     },
     "src_a2375d08bb93": {
@@ -212,7 +218,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 13.0
     },
     "src_aae3bc5f3622": {
@@ -234,7 +240,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.1
     },
     "src_c5339d006712": {
@@ -245,7 +251,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.9
     },
     "src_b9e30922a953": {
@@ -256,7 +262,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 5.8
     },
     "src_73c3b072caa7": {
@@ -267,7 +273,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.5
     },
     "src_80558a4c292d": {
@@ -283,7 +289,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.0
     },
     "src_4cb4ca15b8ce": {
@@ -294,7 +300,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 3.4
     },
     "src_e963e4bcb34c": {
@@ -305,7 +311,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 5.4
     },
     "src_c84efc6ca28d": {
@@ -316,7 +322,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 3.4
     },
     "src_dece3236f028": {
@@ -327,7 +333,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 4.6
     },
     "src_9b00edad31b0": {
@@ -360,7 +366,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 9.8
     },
     "src_1031dee58095": {
@@ -371,7 +377,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 14.2
     },
     "src_72d0177a68de": {
@@ -382,7 +388,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 14.2
     },
     "src_74bf40317264": {
@@ -393,7 +399,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 5.8
     },
     "src_7d3b20c638ae": {
@@ -404,7 +410,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 18.5
     },
     "src_d969428fdd23": {
@@ -415,7 +421,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.6
     },
     "src_fc1187914f8f": {
@@ -426,7 +432,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 7.6
     },
     "src_d99e01185173": {
@@ -437,7 +443,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 10.1
     },
     "src_34f8830fa5eb": {
@@ -448,7 +454,7 @@
           "2026-11-14"
         ]
       ],
-      "exhausted": false,
+      "exhausted": true,
       "duration": 10.2
     },
     "src_b8d4df07be19": {
@@ -463,7 +469,7 @@
       "duration": 26.2
     }
   },
-  "montage_offset": 40,
+  "montage_offset": 53,
   "montage_sigs": [
     "src_0c6891b62f7b@1|src_acd76b96eaf7@0|src_6068b0fcac7f@10|src_03292c42e19c@0|src_f96c3973d303@0|src_86c465b0490a@2|src_bf5da4e10098@0|src_d21b86e3b8cb@0|src_1ab179d8ae75@0",
     "src_88fed568aef9@9|src_39d650e32d92@1|src_01bba7dcd527@0|src_cf75557bcd0d@0|src_4e548667ade5@0|src_3c008236e421@0|src_a611dfdf1865@4|src_4af605526c9a@0|src_a2375d08bb93@4|src_aae3bc5f3622@1",
@@ -532,16 +538,82 @@
       "start": 0.0,
       "end": 40.65,
       "created": "2026-11-14T21:32+03:00"
+    },
+    {
+      "account": "main",
+      "file": "list_01.mp4",
+      "title": "Правила выживания в STALZONE",
+      "publish_at": "2026-11-17T09:00:00Z",
+      "source": "list",
+      "start": 0.0,
+      "end": 31.58,
+      "created": "2026-11-14T22:02+03:00"
+    },
+    {
+      "account": "main",
+      "file": "story_01.mp4",
+      "title": "Почему в Зону не ходят одни | STALZONE",
+      "publish_at": "2026-11-17T14:00:00Z",
+      "source": "story",
+      "start": 0.0,
+      "end": 39.18,
+      "created": "2026-11-14T22:02+03:00"
+    },
+    {
+      "account": "main",
+      "file": "list_01.mp4",
+      "title": "Что чувствуешь в первом рейде | STALZONE",
+      "publish_at": "2026-11-17T18:00:00Z",
+      "source": "list",
+      "start": 0.0,
+      "end": 38.68,
+      "created": "2026-11-14T22:02+03:00"
+    },
+    {
+      "account": "main",
+      "file": "story_01.mp4",
+      "title": "Последний патрон | STALZONE",
+      "publish_at": "2026-11-18T09:00:00Z",
+      "source": "story",
+      "start": 0.0,
+      "end": 43.0,
+      "created": "2026-11-14T22:02+03:00"
+    },
+    {
+      "account": "main",
+      "file": "list_01.mp4",
+      "title": "Звуки, от которых в Зоне страшно | STALZONE",
+      "publish_at": "2026-11-18T14:00:00Z",
+      "source": "list",
+      "start": 0.0,
+      "end": 41.9,
+      "created": "2026-11-14T22:02+03:00"
+    },
+    {
+      "account": "main",
+      "file": "story_01.mp4",
+      "title": "Что я понял за сто часов в STALZONE",
+      "publish_at": "2026-11-18T18:00:00Z",
+      "source": "story",
+      "start": 0.0,
+      "end": 43.0,
+      "created": "2026-11-14T22:02+03:00"
     }
   ],
-  "format_offset": 4,
+  "format_offset": 13,
   "content_used": {
     "stories": [
       4,
-      10
+      10,
+      12,
+      11,
+      13
     ],
     "lists": [
-      6
+      6,
+      3,
+      4,
+      5
     ]
   },
   "bg_used": {
@@ -563,6 +635,11 @@
       [
         10.0,
         19.21,
+        "2026-11-14"
+      ],
+      [
+        3.5,
+        7.81,
         "2026-11-14"
       ]
     ],
@@ -592,6 +669,21 @@
         10.0,
         15.54,
         "2026-11-14"
+      ],
+      [
+        23.0,
+        27.41,
+        "2026-11-14"
+      ],
+      [
+        0.1,
+        9.19,
+        "2026-11-14"
+      ],
+      [
+        16.0,
+        22.39,
+        "2026-11-14"
       ]
     ],
     "src_1ab179d8ae75": [
@@ -605,6 +697,11 @@
       [
         1.0,
         7.31,
+        "2026-11-14"
+      ],
+      [
+        3.65,
+        8.62,
         "2026-11-14"
       ]
     ],
@@ -627,12 +724,246 @@
         5.5,
         9.88,
         "2026-11-14"
+      ],
+      [
+        0.1,
+        4.86,
+        "2026-11-14"
       ]
     ],
     "src_4e548667ade5": [
       [
         2.5,
         7.84,
+        "2026-11-14"
+      ]
+    ],
+    "src_88fed568aef9": [
+      [
+        4.5,
+        13.41,
+        "2026-11-14"
+      ]
+    ],
+    "src_4cb4ca15b8ce": [
+      [
+        0.1,
+        3.18,
+        "2026-11-14"
+      ],
+      [
+        0.1,
+        3.33,
+        "2026-11-14"
+      ]
+    ],
+    "src_c84efc6ca28d": [
+      [
+        0.1,
+        3.17,
+        "2026-11-14"
+      ]
+    ],
+    "src_ae94a345ebbb": [
+      [
+        0.1,
+        6.78,
+        "2026-11-14"
+      ]
+    ],
+    "src_6ff4a1e5653c": [
+      [
+        1.5,
+        11.3,
+        "2026-11-14"
+      ]
+    ],
+    "src_cf75557bcd0d": [
+      [
+        0.1,
+        4.37,
+        "2026-11-14"
+      ]
+    ],
+    "src_7d3b20c638ae": [
+      [
+        1.0,
+        5.42,
+        "2026-11-14"
+      ],
+      [
+        8.5,
+        14.42,
+        "2026-11-14"
+      ]
+    ],
+    "src_c5339d006712": [
+      [
+        2.0,
+        7.37,
+        "2026-11-14"
+      ]
+    ],
+    "src_aae3bc5f3622": [
+      [
+        1.0,
+        5.53,
+        "2026-11-14"
+      ]
+    ],
+    "src_e963e4bcb34c": [
+      [
+        0.1,
+        5.22,
+        "2026-11-14"
+      ],
+      [
+        0.41,
+        4.63,
+        "2026-11-14"
+      ]
+    ],
+    "src_bf5da4e10098": [
+      [
+        0.1,
+        3.27,
+        "2026-11-14"
+      ]
+    ],
+    "src_b8d4df07be19": [
+      [
+        7.5,
+        13.21,
+        "2026-11-14"
+      ],
+      [
+        14.5,
+        24.64,
+        "2026-11-14"
+      ],
+      [
+        2.0,
+        6.42,
+        "2026-11-14"
+      ]
+    ],
+    "src_f96c3973d303": [
+      [
+        0.1,
+        6.62,
+        "2026-11-14"
+      ]
+    ],
+    "src_b9e30922a953": [
+      [
+        0.1,
+        5.65,
+        "2026-11-14"
+      ]
+    ],
+    "src_d21b86e3b8cb": [
+      [
+        0.1,
+        3.38,
+        "2026-11-14"
+      ]
+    ],
+    "src_a611dfdf1865": [
+      [
+        1.5,
+        11.57,
+        "2026-11-14"
+      ]
+    ],
+    "src_34f8830fa5eb": [
+      [
+        0.1,
+        9.71,
+        "2026-11-14"
+      ]
+    ],
+    "src_9b00edad31b0": [
+      [
+        0.1,
+        3.95,
+        "2026-11-14"
+      ]
+    ],
+    "src_1031dee58095": [
+      [
+        4.0,
+        9.18,
+        "2026-11-14"
+      ]
+    ],
+    "src_8bd2c760e8a8": [
+      [
+        1.0,
+        5.65,
+        "2026-11-14"
+      ]
+    ],
+    "src_acd76b96eaf7": [
+      [
+        0.1,
+        4.62,
+        "2026-11-14"
+      ]
+    ],
+    "src_4af605526c9a": [
+      [
+        0.1,
+        6.15,
+        "2026-11-14"
+      ]
+    ],
+    "src_3c008236e421": [
+      [
+        0.1,
+        6.48,
+        "2026-11-14"
+      ],
+      [
+        0.78,
+        6.15,
+        "2026-11-14"
+      ]
+    ],
+    "src_d99e01185173": [
+      [
+        1.0,
+        9.96,
+        "2026-11-14"
+      ],
+      [
+        0.21,
+        6.54,
+        "2026-11-14"
+      ]
+    ],
+    "src_fc1187914f8f": [
+      [
+        0.1,
+        7.4,
+        "2026-11-14"
+      ]
+    ],
+    "src_86c465b0490a": [
+      [
+        0.1,
+        10.25,
+        "2026-11-14"
+      ]
+    ],
+    "src_72d0177a68de": [
+      [
+        4.0,
+        8.35,
+        "2026-11-14"
+      ],
+      [
+        2.78,
+        7.03,
         "2026-11-14"
       ]
     ]
