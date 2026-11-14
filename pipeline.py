@@ -388,8 +388,7 @@ def pick_content(items, state, key):
     return items[i]
 
 
-def tts(text, voice, rate, mp3):
-    """Озвучка через edge-tts. Возвращает слова с таймингами [{start,end,word}] и длительность."""
+def _edge_tts(text, voice, rate, mp3):
     import asyncio
     import edge_tts
 
@@ -409,16 +408,85 @@ def tts(text, voice, rate, mp3):
                 elif ch["type"] == "SentenceBoundary":
                     st = ch["offset"] / 1e7
                     sents.append((st, st + ch["duration"] / 1e7, ch["text"]))
-        if not words and sents:  # только предложения — раскладываем слова равномерно
+        if not words and sents:
             for st, en, tx in sents:
                 ws = tx.split()
                 step = (en - st) / max(1, len(ws))
                 for j, w in enumerate(ws):
                     words.append({"start": st + j * step, "end": st + (j + 1) * step, "word": w})
         return words
-    words = asyncio.run(run())
-    dur, _ = probe_info(mp3)
-    return words, dur
+    return asyncio.run(run())
+
+
+def estimate_words(text, dur, lead=0.12, tail=0.25):
+    """Тайминги слов без данных от движка: по длине слова + паузы на знаках препинания."""
+    toks = [t for t in text.split() if re.sub(r"\W", "", t)]
+    def core(t):
+        return len(re.sub(r"\W", "", t)) + 1.5
+    def pause(t):
+        return 5.0 if re.search(r"[.!?…]$", t) else 2.5 if re.search(r"[,;:—–]$", t) else 0.0
+    total = sum(core(t) + pause(t) for t in toks) or 1
+    k = max(0.01, dur - lead - tail) / total
+    out, t = [], lead
+    for tok in toks:
+        out.append({"start": round(t, 3), "end": round(t + core(tok) * k, 3), "word": tok})
+        t += (core(tok) + pause(tok)) * k
+    return out
+
+
+PIPER_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU"
+
+
+def _piper_tts(text, voice_name, wav):
+    """Локальная озвучка Piper (работает на сервере GitHub без внешних TTS-сервисов)."""
+    import requests
+    name, q = voice_name.split(":") if ":" in voice_name else (voice_name, "medium")
+    mdir = WORK / "piper"
+    mdir.mkdir(parents=True, exist_ok=True)
+    onnx = mdir / f"ru_RU-{name}-{q}.onnx"
+    for path, url in ((onnx, f"{PIPER_BASE}/{name}/{q}/ru_RU-{name}-{q}.onnx"),
+                      (Path(str(onnx) + ".json"), f"{PIPER_BASE}/{name}/{q}/ru_RU-{name}-{q}.onnx.json")):
+        if not path.exists() or path.stat().st_size == 0:
+            log(f"  скачиваю голос Piper {path.name}…")
+            r = requests.get(url, timeout=300)
+            r.raise_for_status()
+            path.write_bytes(r.content)
+    clean = re.sub(r"\s+", " ", text.replace("—", ",").replace("«", "").replace("»", "")).strip()
+    last = None
+    for cmd in (["piper", "-m", str(onnx), "-f", str(wav)],
+                [sys.executable, "-m", "piper", "-m", str(onnx), "-f", str(wav)]):
+        try:
+            subprocess.run(cmd, input=clean.encode("utf-8"), check=True, capture_output=True, timeout=600)
+            if wav.exists() and wav.stat().st_size > 1000:
+                return
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            last = e
+    raise RuntimeError(f"Piper не сработал: {last}")
+
+
+def tts(text, content, out_dir):
+    """Озвучка: edge-tts (3 попытки, запасной голос) → если не вышло, Piper.
+    Возвращает (путь к аудио, слова с таймингами, длительность, движок)."""
+    import time
+    voice = content.get("voice", "ru-RU-DmitryNeural")
+    rate = content.get("rate", "+0%")
+    mp3 = out_dir / "voice.mp3"
+    for attempt, v in enumerate([voice, voice, content.get("voice_backup", "ru-RU-SvetlanaNeural")]):
+        try:
+            words = _edge_tts(text, v, rate, mp3)
+            dur, _ = probe_info(mp3)
+            if dur > 2:
+                if not words:
+                    words = estimate_words(text, dur)
+                return mp3, words, dur, f"edge:{v}"
+        except Exception as e:
+            log(f"  edge-tts попытка {attempt + 1}: {type(e).__name__}")
+        time.sleep(4 + attempt * 4)
+    log("  edge-tts недоступен — озвучиваю через Piper")
+    wav = out_dir / "voice.wav"
+    _piper_tts(text, content.get("piper_voice", "dmitri:medium"), wav)
+    dur, _ = probe_info(wav)
+    return wav, estimate_words(text, dur), dur, "piper"
 
 
 def run_autoclip_single(cfg, camp, video, out_dir, title, extra, subs=False):
@@ -446,11 +514,11 @@ def fmt_story(cfg, camp, state, longs, shorts, d):
         return None
     st = pick_content(content["stories"], state, "stories")
     d.mkdir(parents=True, exist_ok=True)
-    voice = d / "voice.mp3"
     log(f"Озвучка: «{st['title']}»")
-    words, vdur = tts(st["text"], content.get("voice", "ru-RU-DmitryNeural"), content.get("rate", "+0%"), voice)
-    delay = 1.2  # секунда на заголовок до голоса
-    total = max(41.0, delay + vdur + 1.3)
+    voice, words, vdur, engine = tts(st["text"], content, d)
+    log(f"  голос: {engine}, {vdur:.1f} с")
+    delay = 0.4  # голос почти сразу — первые секунды решают, досмотрят ли ролик
+    total = max(43.0, delay + vdur + 1.5)  # с запасом выше минимума кампании (40 с)
     lengths, acc = [], 0.0
     while acc < total + 0.5:
         L = random.uniform(4.0, 7.0)
@@ -458,7 +526,8 @@ def fmt_story(cfg, camp, state, longs, shorts, d):
         acc += L
     pieces = pick_bg_pieces(shorts + longs, state, lengths, camp.get("bg_cooldown_days", 3))
     video = d / "story.mp4"
-    render_pieces(pieces, video, voice=voice, voice_delay=delay, total=total, bg_volume=0.22)
+    render_pieces(pieces, video, voice=voice, voice_delay=delay, total=total,
+                  bg_volume=content.get("bg_volume", 0.4))
     for w in words:
         w["start"] += delay
         w["end"] += delay
@@ -478,7 +547,7 @@ def fmt_list(cfg, camp, state, longs, shorts, d):
     it = pick_content(content["lists"], state, "lists")
     d.mkdir(parents=True, exist_ok=True)
     items = it["items"]
-    per = max(8.2, 46.0 / len(items))
+    per = max(8.8, 47.0 / len(items))
     lengths = [per + random.uniform(-0.6, 0.8) for _ in items]
     pieces = pick_bg_pieces(shorts + longs, state, lengths, camp.get("bg_cooldown_days", 3))
     video = d / "list.mp4"

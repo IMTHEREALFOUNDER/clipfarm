@@ -4,6 +4,7 @@ gdown>=5.0
 yt-dlp
 requests
 edge-tts>=6.1
+piper-tts
 google-api-python-client
 google-auth
 google-auth-oauthlib
