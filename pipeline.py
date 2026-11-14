@@ -17,6 +17,7 @@ pipeline.py — ежедневный конвейер нарезок под не
 """
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -58,10 +59,9 @@ def drive_file_id(url):
 
 
 def source_key(src):
+    """Короткий хэш вместо ссылки — чтобы state.json в публичном репозитории ничего не раскрывал."""
     fid = drive_file_id(src) if src.startswith("http") else None
-    if fid:
-        return fid
-    return re.sub(r"[^\w\-]+", "_", Path(src).stem if not src.startswith("http") else src)[-60:]
+    return "src_" + hashlib.sha1((fid or src).encode("utf-8")).hexdigest()[:12]
 
 
 def fetch_source(src, dest_dir):
@@ -79,10 +79,10 @@ def fetch_source(src, dest_dir):
     fid = drive_file_id(src)
     if fid:
         import gdown
-        log(f"Скачиваю с Google Диска: {fid}")
-        res = gdown.download(id=fid, output=str(out), quiet=False)
+        log(f"Скачиваю футаж {key}…")
+        res = gdown.download(id=fid, output=str(out), quiet=True)
         if not res or not out.exists():
-            raise RuntimeError(f"Не удалось скачать {src}. Проверь, что у файла доступ «Все, у кого есть ссылка».")
+            raise RuntimeError(f"Не удалось скачать футаж {key}. Проверь доступ «Все, у кого есть ссылка».")
         return out
     log(f"Скачиваю по ссылке: {src}")
     subprocess.run(["yt-dlp", "-f", "bv*[height<=1080]+ba/b", "--merge-output-format", "mp4",
@@ -91,6 +91,15 @@ def fetch_source(src, dest_dir):
 
 
 VIDEO_EXT = (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi")
+
+
+def campaign_sources(camp):
+    """Источники берутся из секрета CLIP_SOURCES (если задан), иначе из config.json.
+    Так ссылки на футажи не видны в публичном репозитории."""
+    env = os.environ.get("CLIP_SOURCES", "").strip()
+    if env:
+        return [s.strip() for s in re.split(r"[\n,]+", env) if s.strip()]
+    return [s for s in camp.get("sources", []) if "ВСТАВЬ" not in s]
 
 
 def drive_folder_id(url):
@@ -106,26 +115,34 @@ def expand_sources(sources, state):
         if not fid:
             out.append(src)
             continue
-        cache = state.setdefault("folders", {}).get(fid)
+        cache_path = WORK / "sources" / "_folders.json"
+        fcache = load_json(cache_path, {})
+        cache = fcache.get(fid)
         files = None
         try:
+            import inspect
             import gdown
-            try:  # gdown >= 5.2 умеет только получить список, ничего не скачивая
-                items = gdown.download_folder(id=fid, output=str(WORK / "listing" / fid), quiet=True,
-                                              skip_download=True, remaining_ok=True)
-                files = [(it.id, it.path) for it in items or []]
-            except TypeError:
-                items = gdown.download_folder(id=fid, output=str(WORK / "sources" / fid), quiet=False,
-                                              remaining_ok=True)
-                files = [(None, p) for p in items or []]
+            # разные версии gdown принимают разные параметры — передаём только поддерживаемые
+            params = inspect.signature(gdown.download_folder).parameters
+            kw = {"id": fid, "quiet": True}
+            if "remaining_ok" in params:
+                kw["remaining_ok"] = True
+            if "skip_download" in params:  # можно получить список, ничего не скачивая
+                items = gdown.download_folder(output=str(WORK / "listing" / fid), skip_download=True, **kw)
+                files = [(getattr(it, "id", None), str(getattr(it, "path", it))) for it in items or []]
+            else:
+                items = gdown.download_folder(output=str(WORK / "sources" / fid), **kw)
+                files = [(None, str(p)) for p in items or []]
         except Exception as e:
-            log(f"⚠️ Не удалось прочитать папку {fid}: {e}")
+            log(f"⚠️ Не удалось прочитать папку с футажами: {e}")
         if files is None:
             files = [tuple(x) for x in (cache or [])]
         else:
-            state["folders"][fid] = [list(x) for x in files]
+            fcache[fid] = [list(x) for x in files]
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            save_json(cache_path, fcache)
         vids = [(i, p) for i, p in files if str(p).lower().endswith(VIDEO_EXT)]
-        log(f"Папка {fid}: найдено видео — {len(vids)}")
+        log(f"Папка с футажами: найдено видео — {len(vids)}")
         for i, p in sorted(vids, key=lambda x: str(x[1])):
             out.append(f"https://drive.google.com/file/d/{i}/view" if i else str(p))
     return out
@@ -158,11 +175,11 @@ def cut_clips(cfg, state, need, run_dir):
     clips = []
     hooks = camp.get("hooks", [])
     offset = state.get("hook_offset", 0)
-    for src in expand_sources(camp["sources"], state):
+    for src in expand_sources(campaign_sources(camp), state):
         if len(clips) >= need:
             break
         key = source_key(src)
-        sst = state.setdefault("sources", {}).setdefault(key, {"src": src, "used": [], "exhausted": False})
+        sst = state.setdefault("sources", {}).setdefault(key, {"used": [], "exhausted": False})
         if sst.get("exhausted"):
             continue
         try:
@@ -294,8 +311,8 @@ def main():
     save_json(STATE_PATH, state)  # сохраняем использованные отрезки сразу
     if not clips:
         tg_call("sendMessage", {"text": "⚠️ Конвейер: новых роликов нет — все исходники исчерпаны. "
-                                        "Добавь новые ссылки в config.json → campaign.sources."})
-        sys.exit("Новых роликов нет: добавь исходники.")
+                                        "Проверь секрет CLIP_SOURCES или добавь новые футажи в папку."})
+        sys.exit("Новых роликов нет: проверь секрет CLIP_SOURCES и доступ к папке.")
 
     camp = cfg["campaign"]
     report = [f"🎬 {camp['name']}: {len(clips)} новых роликов ({now:%d.%m %H:%M})"]

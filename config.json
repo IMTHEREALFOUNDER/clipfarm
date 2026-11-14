@@ -3,9 +3,7 @@
   "mode": "telegram",
   "campaign": {
     "name": "STALZONE",
-    "sources": [
-      "https://drive.google.com/drive/folders/1ISG9LIUNZz8qduKKV_ozUNM6pq_piIzl"
-    ],
+    "sources": [],
     "banner": "stalzone.png",
     "autoclip_args": [
       "--preset",

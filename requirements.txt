@@ -1,9 +1,9 @@
 numpy
 opencv-python-headless>=4.8,<5
-faster-whisper>=1.0
 gdown>=5.0
 yt-dlp
 requests
 google-api-python-client
 google-auth
 google-auth-oauthlib
+# faster-whisper>=1.0   # нужен только для субтитров по речи (подкасты); для геймплея --no-subs не нужен
