@@ -1,0 +1,61 @@
+{
+  "timezone": "Europe/Moscow",
+  "mode": "telegram",
+  "campaign": {
+    "name": "STALZONE",
+    "sources": [
+      "https://drive.google.com/drive/folders/1ISG9LIUNZz8qduKKV_ozUNM6pq_piIzl"
+    ],
+    "banner": "assets/stalzone.png",
+    "autoclip_args": [
+      "--preset",
+      "game",
+      "--no-subs"
+    ],
+    "hooks": [
+      "Самый жёсткий момент в STALZONE",
+      "Аномалия чуть не убила",
+      "Новичок впервые в Зоне",
+      "Почти вынес лут из Зоны",
+      "Зона не прощает ошибок",
+      "Это было слишком близко",
+      "Эвакуация за секунду до конца",
+      "Вот почему ночью в Зону не ходят"
+    ],
+    "description": "STALZONE — extraction-шутер с живым открытым миром, где прогресс растёт вместе с риском.\nЛучшие моменты из Зоны каждый день.\n#STALZONE #shorts #игры",
+    "tags": [
+      "STALZONE",
+      "extraction shooter",
+      "экстракшн шутер",
+      "шутер",
+      "игры",
+      "shorts"
+    ]
+  },
+  "accounts": [
+    {
+      "id": "main",
+      "enabled": true,
+      "clips_per_day": 3,
+      "slots": [
+        "12:00",
+        "17:00",
+        "21:00"
+      ],
+      "buffer_days": 1,
+      "title_format": "{hook} | {game}"
+    },
+    {
+      "id": "acc2",
+      "enabled": false,
+      "clips_per_day": 3,
+      "slots": [
+        "11:30",
+        "16:30",
+        "20:30"
+      ],
+      "buffer_days": 1,
+      "title_format": "{game}: {hook}"
+    }
+  ]
+}
