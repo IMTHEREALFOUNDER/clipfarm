@@ -109,8 +109,13 @@ def get_source(inp, workdir):
 
 # ---------------------------------------------------------------- шаг 1: аудио + транскрипция
 def extract_audio(video, wav):
-    run(["ffmpeg", "-y", "-v", "error", "-i", str(video), "-vn", "-ac", "1",
-         "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+    try:
+        run(["ffmpeg", "-y", "-v", "quiet", "-i", str(video), "-vn", "-ac", "1",
+             "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+    except subprocess.CalledProcessError:  # в видео нет звука — делаем тишину той же длины
+        dur = probe(video)[2]
+        run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
+             "-t", f"{dur:.3f}", "-c:a", "pcm_s16le", str(wav)])
 
 
 def rms_curve(wav, hop=0.25):
@@ -278,15 +283,16 @@ def motion_curve(video, hop=0.5):
     return np.array(vals or [0.0]), hop
 
 
-def find_action_moments(rms, hop, motion, mhop, n_clips, min_len, max_len, total_dur, excluded=()):
+def find_action_moments(rms, hop, motion, mhop, n_clips, min_len, max_len, total_dur, excluded=(), margin=2.0):
     """Для геймплея без речи: ищем куски с громкими пиками (выстрелы, взрывы) и активной картинкой."""
     L = min(max_len, max(min_len, (min_len + max_len) / 2))
     if total_dur < min_len:
         return []
     L = min(L, total_dur)
     med = float(np.median(rms[rms > 0])) if np.any(rms > 0) else 1.0
-    starts = np.arange(1.0, max(1.01, total_dur - L - 1.0), 1.0)
-    starts = np.array([x for x in starts if not overlaps(x, x + L, excluded)])
+    step = 1.0 if total_dur > 30 else 0.5
+    starts = np.arange(min(1.0, max(0.1, total_dur - L - 0.1)), max(0.11, total_dur - L - 0.1), step)
+    starts = np.array([x for x in starts if not overlaps(x, x + L, excluded, margin)])
     feats = []
     for s in starts:
         e = s + L

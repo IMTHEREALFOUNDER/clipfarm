@@ -169,44 +169,161 @@ def next_slots(slots, count, tz, now, min_lead_min=40, taken=()):
 
 
 # ------------------------------------------------------------------ нарезка
+def probe_info(path):
+    """(длительность, есть ли звук)"""
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration:stream=codec_type",
+                          "-of", "json", str(path)], capture_output=True, text=True).stdout
+    d = json.loads(out or "{}")
+    dur = float(d.get("format", {}).get("duration", 0) or 0)
+    has_audio = any(st.get("codec_type") == "audio" for st in d.get("streams", []))
+    return dur, has_audio
+
+
+def autoclip_cmd(cfg, camp, video, out_dir, n, hooks_rot, extra):
+    cmd = [sys.executable, str(ROOT / "autoclip.py"), str(video), "--out", str(out_dir),
+           "--clips", str(n), *camp.get("autoclip_args", []), *extra]
+    if camp.get("banner"):
+        cmd += ["--banner", str(ROOT / camp["banner"])]
+    if hooks_rot:
+        cmd += ["--top-text", "|".join(hooks_rot)]
+    if cfg.get("mode") == "telegram":
+        cmd += ["--maxrate", "5M"]  # чтобы файл влез в лимит Telegram (50 МБ)
+    return cmd
+
+
+def rotated(hooks, offset):
+    return hooks[offset % len(hooks):] + hooks[:offset % len(hooks)] if hooks else []
+
+
+def best_piece(path, length, used, cache):
+    """Лучший по экшену кусок длиной `length` внутри короткого файла, не пересекающийся с used."""
+    import autoclip as AC
+    key = str(path)
+    if key not in cache:
+        wav = WORK / "tmp" / (Path(path).stem + ".wav")
+        wav.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            AC.extract_audio(path, wav)
+            rms, hop = AC.rms_curve(wav)
+        except Exception:
+            import numpy as np
+            rms, hop = np.ones(4), 0.25
+        motion, mhop = AC.motion_curve(path)
+        cache[key] = (rms, hop, motion, mhop)
+    rms, hop, motion, mhop = cache[key]
+    dur, _ = probe_info(path)
+    if dur < length + 0.3:
+        length = dur - 0.3
+    if length < 2.5:
+        return None
+    excl = [tuple(x) for x in used]
+    got = AC.find_action_moments(rms, hop, motion, mhop, 1, length, length, dur, excl, margin=0.3) \
+        if dur > length + 0.5 else []
+    if got:
+        return got[0][0], got[0][1]
+    # файл почти равен куску — берём от начала, если он ещё не использован
+    s, e = 0.1, 0.1 + length
+    return (s, e) if not AC.overlaps(s, e, excl, margin=0.5) else None
+
+
+def build_montage(shorts, state, mcfg, out_path):
+    """Склейка нескольких коротких B-roll фрагментов в один исходник для ролика."""
+    import random
+    target = random.uniform(*mcfg.get("target", [45, 60]))
+    pmin, pmax = mcfg.get("piece", [5, 9])
+    start = state.get("montage_offset", 0)
+    order = shorts[start % len(shorts):] + shorts[:start % len(shorts)]
+    pieces, total, cache = [], 0.0, {}
+    for key, path, dur, has_audio in order:
+        if total >= target - 1:
+            break
+        sst = state["sources"][key]
+        if sst.get("exhausted"):
+            continue
+        length = min(random.uniform(pmin, pmax), max(3.0, target - total))
+        win = best_piece(path, length, sst["used"], cache)
+        if not win:
+            sst["exhausted"] = True
+            continue
+        pieces.append((key, path, win[0], win[1], has_audio))
+        total += win[1] - win[0]
+    state["montage_offset"] = start + max(1, len(pieces))
+    if total < mcfg.get("min_total", 40):
+        return None, []
+    # ffmpeg: каждый кусок → 1920x1080 60fps, стерео 48 кГц, потом склейка
+    inputs, filt = [], []
+    for i, (_, path, s, e, has_audio) in enumerate(pieces):
+        inputs += ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}", "-i", str(path)]
+        filt.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
+                    f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=60,setsar=1,format=yuv420p[v{i}]")
+        if has_audio:
+            filt.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,"
+                        f"atrim=0:{e - s:.3f},asetpts=PTS-STARTPTS[a{i}]")
+        else:
+            filt.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{e - s:.3f}[a{i}]")
+    filt.append("".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + f"concat=n={len(pieces)}:v=1:a=1[v][a]")
+    cmd = ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(filt),
+           "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17",
+           "-c:a", "aac", "-b:a", "192k", str(out_path)]
+    subprocess.run(cmd, check=True)
+    for key, _, s, e, _ in pieces:
+        state["sources"][key]["used"].append([round(s, 2), round(e, 2)])
+    return out_path, [k for k, *_ in pieces]
+
+
 def cut_clips(cfg, state, need, run_dir):
-    """Нарезает `need` новых роликов из исходников кампании, обновляя state."""
+    """Нарезает `need` новых роликов: длинные футажи режутся, короткие B-roll склеиваются в монтаж."""
     camp = cfg["campaign"]
+    mcfg = camp.get("montage", {})
+    min_long = mcfg.get("long_threshold", 75)  # футаж короче — идёт в монтаж
     clips = []
     hooks = camp.get("hooks", [])
     offset = state.get("hook_offset", 0)
-    for src in expand_sources(campaign_sources(camp), state):
-        if len(clips) >= need:
-            break
+    longs, shorts, fails = [], [], 0
+    srcs = expand_sources(campaign_sources(camp), state)
+    for src in srcs:
         key = source_key(src)
         sst = state.setdefault("sources", {}).setdefault(key, {"used": [], "exhausted": False})
         if sst.get("exhausted"):
             continue
         try:
             video = fetch_source(src, WORK / "sources")
-        except Exception as e:
-            log(f"⚠️ Исходник пропущен: {e}")
+            fails = 0
+        except Exception:
+            fails += 1
+            log(f"⚠️ Не удалось скачать футаж {key} (нет доступа или ссылка не работает)")
+            if fails >= 3:
+                tg_call("sendMessage", {"text": "⚠️ Конвейер: футажи не скачиваются — нет доступа. "
+                                                "Проверь, что папка в CLIP_SOURCES открыта «Все, у кого есть ссылка», "
+                                                "и что в ней лежат сами видео, а не ярлыки."})
+                log("Три отказа подряд — останавливаю скачивание.")
+                break
             continue
+        dur, has_audio = probe_info(video)
+        sst["duration"] = round(dur, 1)
+        (longs if dur >= min_long else shorts).append((key, video, dur, has_audio))
+        # для длинных хватит пары файлов за запуск, короткие собираем все — из них монтаж
+        if len(longs) >= need and len(shorts) >= max(12, need * 6):
+            break
+    log(f"Футажи: длинных {len(longs)}, коротких (для монтажа) {len(shorts)}")
+
+    # 1) длинные — обычная нарезка
+    for key, video, dur, _ in longs:
+        if len(clips) >= need:
+            break
+        sst = state["sources"][key]
         excl = run_dir / f"{key}.exclude.json"
         save_json(excl, sst["used"])
         out_dir = run_dir / key
-        rot = hooks[offset % len(hooks):] + hooks[:offset % len(hooks)] if hooks else []
-        cmd = [sys.executable, str(ROOT / "autoclip.py"), str(video), "--out", str(out_dir),
-               "--clips", str(need - len(clips)), "--exclude", str(excl), *camp.get("autoclip_args", [])]
-        if camp.get("banner"):
-            cmd += ["--banner", str(ROOT / camp["banner"])]
-        if rot:
-            cmd += ["--top-text", "|".join(rot)]
-        if cfg.get("mode") == "telegram":
-            cmd += ["--maxrate", "5M"]  # чтобы файл влез в лимит Telegram (50 МБ)
         log(f"\n=== Нарезка из {key}: нужно ещё {need - len(clips)} ===")
-        code = subprocess.run(cmd).returncode
+        code = subprocess.run(autoclip_cmd(cfg, camp, video, out_dir, need - len(clips), rotated(hooks, offset),
+                                           ["--exclude", str(excl)])).returncode
         manifests = list(out_dir.glob("*.clips.json"))
         got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
         if code not in (0, 3):
             log(f"⚠️ autoclip завершился с кодом {code}")
         if len(got) < need - len(clips):
-            sst["exhausted"] = True  # новых моментов больше нет — переходим к следующему исходнику
+            sst["exhausted"] = True
             log(f"Исходник {key} исчерпан")
         for c in got:
             sst["used"].append([c["start"], c["end"]])
@@ -214,6 +331,37 @@ def cut_clips(cfg, state, need, run_dir):
             c["source"] = key
             clips.append(c)
         offset += len(got)
+
+    # 2) короткие — монтаж из нескольких B-roll фрагментов
+    n = 0
+    while len(clips) < need and shorts:
+        n += 1
+        mdir = run_dir / f"montage_{n:02d}"
+        mdir.mkdir(parents=True, exist_ok=True)
+        log(f"\n=== Монтаж №{n} из коротких футажей ===")
+        try:
+            mpath, used_keys = build_montage(shorts, state, mcfg, mdir / f"montage_{n:02d}.mp4")
+        except subprocess.CalledProcessError as e:
+            log(f"⚠️ Ошибка склейки: {e}")
+            break
+        if not mpath:
+            log("Короткие футажи исчерпаны — новых кусков для монтажа нет.")
+            break
+        mdur, _ = probe_info(mpath)
+        seg = mdir / "seg.txt"
+        seg.write_text(f"0:00-{mdur:.2f}\n", encoding="utf-8")
+        code = subprocess.run(autoclip_cmd(cfg, camp, mpath, mdir, 1, rotated(hooks, offset),
+                                           ["--segments", str(seg)])).returncode
+        manifests = list(mdir.glob("*.clips.json"))
+        got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
+        if code != 0 or not got:
+            log(f"⚠️ Не удалось собрать ролик из монтажа (код {code})")
+            break
+        c = got[0]
+        c["path"] = str(mdir / c["file"])
+        c["source"] = "+".join(used_keys)
+        clips.append(c)
+        offset += 1
     state["hook_offset"] = offset
     return clips
 

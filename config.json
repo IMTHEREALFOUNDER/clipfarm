@@ -28,7 +28,19 @@
       "шутер",
       "игры",
       "shorts"
-    ]
+    ],
+    "montage": {
+      "long_threshold": 75,
+      "target": [
+        45,
+        60
+      ],
+      "piece": [
+        5,
+        9
+      ],
+      "min_total": 40
+    }
   },
   "accounts": [
     {
