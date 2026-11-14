@@ -40,6 +40,10 @@
         9
       ],
       "min_total": 40
+    },
+    "recycle": {
+      "enabled": true,
+      "cooldown_days": 30
     }
   },
   "accounts": [
