@@ -279,23 +279,36 @@ def build_montage(shorts, state, mcfg, out_path, recycle=False, cooldown=30):
         state["montage_offset"] = state.get("montage_offset", 0) + max(1, len(pieces))
     if total < mcfg.get("min_total", 40):
         return None, []
-    # одна и та же склейка не повторяется никогда
+    # 1) одна и та же склейка не повторяется никогда
     sig = "|".join(f"{k}@{round(s)}" for k, _, s, _, _ in pieces)
     seen = state.setdefault("montage_sigs", [])
     if sig in seen:
         return None, []
+    # 2) «почти копии» тоже нельзя: с любым роликом за lookback_days общих фрагментов не больше max_overlap
+    rcfg = mcfg.get("_recycle", {})
+    ids = {f"{k}@{int(s // 3)}" for k, _, s, _, _ in pieces}  # кусок ±3 сек считаем тем же
+    cutoff = (dt.date.today() - dt.timedelta(days=rcfg.get("lookback_days", 30))).isoformat()
+    hist = [h for h in state.get("montage_history", []) if h["d"] >= cutoff]
+    limit = rcfg.get("max_overlap", 0.34)
+    for h in hist:
+        if len(ids & set(h["p"])) / max(1, len(ids)) > limit:
+            return None, []
     seen.append(sig)
     state["montage_sigs"] = seen[-2000:]
+    hist.append({"d": today_str(), "p": sorted(ids)})
+    state["montage_history"] = hist
     inputs, filt = [], []
     for i, (_, path, s, e, has_audio) in enumerate(pieces):
+        # при пересборке часть кусков слегка ускоряем — ролик выглядит иначе
+        sp = random.choice([1.0, 1.0, 1.1]) if recycle else 1.0
         inputs += ["-ss", f"{s:.3f}", "-t", f"{e - s:.3f}", "-i", str(path)]
         filt.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,"
-                    f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=60,setsar=1,format=yuv420p[v{i}]")
+                    f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=60,setsar=1,setpts=PTS/{sp},format=yuv420p[v{i}]")
         if has_audio:
             filt.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,"
-                        f"atrim=0:{e - s:.3f},asetpts=PTS-STARTPTS[a{i}]")
+                        f"atrim=0:{e - s:.3f},asetpts=PTS-STARTPTS,atempo={sp}[a{i}]")
         else:
-            filt.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{e - s:.3f}[a{i}]")
+            filt.append(f"anullsrc=r=48000:cl=stereo,atrim=0:{(e - s) / sp:.3f}[a{i}]")
     filt.append("".join(f"[v{i}][a{i}]" for i in range(len(pieces))) + f"concat=n={len(pieces)}:v=1:a=1[v][a]")
     cmd = ["ffmpeg", "-y", "-v", "error", *inputs, "-filter_complex", ";".join(filt),
            "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17",
@@ -363,8 +376,9 @@ def cut_clips(cfg, state, need, run_dir):
 
 
 def _cut_pass(cfg, state, need, run_dir, recycle=False, cooldown=30):
+    import random
     camp = cfg["campaign"]
-    mcfg = camp.get("montage", {})
+    mcfg = dict(camp.get("montage", {}), _recycle=camp.get("recycle", {}))
     clips = []
     hooks = camp.get("hooks", [])
     offset = state.get("hook_offset", 0)
@@ -401,7 +415,7 @@ def _cut_pass(cfg, state, need, run_dir, recycle=False, cooldown=30):
 
     # 2) короткие — монтаж из нескольких B-roll фрагментов
     n, misses = 0, 0
-    while len(clips) < need and shorts and misses < 3:
+    while len(clips) < need and shorts and misses < (8 if recycle else 3):
         n += 1
         mdir = run_dir / f"montage_{n:02d}"
         mdir.mkdir(parents=True, exist_ok=True)
@@ -422,8 +436,10 @@ def _cut_pass(cfg, state, need, run_dir, recycle=False, cooldown=30):
         mdur, _ = probe_info(mpath)
         seg = mdir / "seg.txt"
         seg.write_text(f"0:00-{mdur:.2f}\n", encoding="utf-8")
-        code = subprocess.run(autoclip_cmd(cfg, camp, mpath, mdir, 1, rotated(hooks, offset),
-                                           ["--segments", str(seg)])).returncode
+        extra = ["--segments", str(seg)]
+        if recycle:  # другой масштаб кадра при пересборке
+            extra += ["--fit-zoom", f"{random.uniform(1.5, 1.8):.2f}"]
+        code = subprocess.run(autoclip_cmd(cfg, camp, mpath, mdir, 1, rotated(hooks, offset), extra)).returncode
         manifests = list(mdir.glob("*.clips.json"))
         got = json.loads(manifests[0].read_text(encoding="utf-8")) if manifests else []
         if code != 0 or not got:

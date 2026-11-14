@@ -8,7 +8,9 @@
     "autoclip_args": [
       "--preset",
       "game",
-      "--no-subs"
+      "--no-subs",
+      "--fit-zoom",
+      "1.65"
     ],
     "hooks": [
       "Самый жёсткий момент в STALZONE",
@@ -43,7 +45,9 @@
     },
     "recycle": {
       "enabled": true,
-      "cooldown_days": 30
+      "cooldown_days": 7,
+      "max_overlap": 0.34,
+      "lookback_days": 30
     }
   },
   "accounts": [
