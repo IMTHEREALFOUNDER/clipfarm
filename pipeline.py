@@ -757,7 +757,8 @@ def main():
         future = [s for s in acc_state["scheduled"] if s > now.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")]
         acc_state["scheduled"] = future  # прошедшие слоты больше не держим
         horizon = acc.get("buffer_days", 1) * len(acc["slots"])
-        need = max(0, min(acc["clips_per_day"], horizon - len(future)))
+        # за запуск — не больше max_per_run, чтобы запас на buffer_days набирался за 1–2 дня
+        need = max(0, min(acc.get("max_per_run", acc["clips_per_day"]), horizon - len(future)))
         slots = next_slots(acc["slots"], need, tz, now, taken=future)
         plan.append((acc, slots))
     total_need = sum(len(s) for _, s in plan)
@@ -827,6 +828,15 @@ def main():
     save_json(STATE_PATH, state)
     if mode == "youtube":
         report.append("\nПосле времени публикации отправь эти ссылки в Клипни («Отправить ролик»).")
+    if mode == "telegram":
+        days = {}
+        for a in accounts:
+            for iso in sorted(state["accounts"][a["id"]]["scheduled"]):
+                t = dt.datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).astimezone(tz)
+                days.setdefault(t.strftime("%d.%m"), []).append(f"{a['id']} {t:%H:%M}")
+        report.append("\n🗓 Запас роликов (всё, что уже прислано, но ещё не вышло):")
+        report += [f"  {d}: " + ", ".join(v) for d, v in days.items()]
+        report.append("Загрузи новые ролики в YouTube Studio с отложенной публикацией на эти даты.")
     msg = "\n".join(report)
     log("\n" + msg)
     if mode != "local":

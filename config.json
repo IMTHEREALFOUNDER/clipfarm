@@ -74,8 +74,9 @@
         "17:00",
         "21:00"
       ],
-      "buffer_days": 1,
-      "title_format": "{hook} | {game}"
+      "buffer_days": 4,
+      "title_format": "{hook} | {game}",
+      "max_per_run": 6
     },
     {
       "id": "acc2",
@@ -86,8 +87,9 @@
         "16:30",
         "20:30"
       ],
-      "buffer_days": 1,
-      "title_format": "{game}: {hook}"
+      "buffer_days": 4,
+      "title_format": "{game}: {hook}",
+      "max_per_run": 6
     }
   ]
 }
